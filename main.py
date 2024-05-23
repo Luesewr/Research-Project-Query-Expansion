@@ -20,6 +20,6 @@ print(pt.Experiment(
     [bm25, pipelineBo1QE, pipelineKLQE, pipelineRM3QE, pipelineAxiomaticQE],
     dataset.get_topics(),
     dataset.get_qrels(),
-    eval_metrics=[RR(rel=2), nDCG@10, nDCG@100, AP(rel=2)],
+    eval_metrics=[RR(rel=1), nDCG@10, nDCG@100, AP(rel=1)],
     names=["BM25", "Bo1QE", "KLQE", "RM3QE", "Axiomatic"],
 ))
