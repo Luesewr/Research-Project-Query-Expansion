@@ -1,3 +1,7 @@
 python-terrier
 ir_datasets
 ir-measures
+matplotlib
+mpld3
+numpy
+scikit-learn
