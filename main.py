@@ -3,34 +3,30 @@ from pyterrier.measures import *
 from ir_measures import *
 from pathlib import Path
 import pandas as pd
-# import matplotlib
-# import matplotlib.pyplot as plt
-# import mpld3
-# import numpy as np
-# from sklearn.metrics import r2_score
 from datetime import datetime
 
 if not pt.started():
     pt.init(tqdm="auto", boot_packages=["com.github.terrierteam:terrier-prf:-SNAPSHOT"])
 
-matplotlib.use('Agg')
-
+# Generates or retrieval an already generated index from a dataset
 def get_index_of_dataset(dataset, index_name):
     index_path = str(Path.cwd().joinpath('index', index_name))
-
+    # Try to create a new index
     try:
         indexer = pt.index.IterDictIndexer(index_path)
-        # indexer = pt.TRECCollectionIndexer(index_path)
         indexref = indexer.index(dataset.get_corpus_iter())
         index = pt.IndexFactory.of(indexref)
+    # If anything goes wrong or an index already exists an already generated index will be attempted to use
     except ValueError as e:
-        print('Using existing index instead', e)
+        print(e, 'Using existing index instead')
         index = pt.IndexRef.of(index_path)
     
     return index
 
+# Will print extra information while the experiments are running
 debug = False
 
+# State the different setups of datasets
 datasets = [
     {
         "dataset_name": "irds:msmarco-passage/trec-dl-2019/judged",
@@ -70,13 +66,16 @@ datasets = [
     }
 ]
 
+# Limit the amount of topics that will be tested
 query_limit = 1000
 
+# Give different parameter sets for the fb_docs and fb_terms for all query expansion models
 fb_setups = [(3, 10), (10, 40), (50, 50)]
 
 if debug:
     print('Loading models...')
 
+# Run the set of experiments for every dataset
 for dataset_info in datasets:
     dataset_name = dataset_info["dataset_name"]
     index_name = dataset_info["index_name"]
@@ -100,18 +99,21 @@ for dataset_info in datasets:
     for fb_docs, fb_terms in fb_setups:
         print("fb_docs:", fb_docs, ", fb_terms:", fb_terms)
 
+        # Create the query expansion pipelines
         models['BM25'] = pt.BatchRetrieve(index, wmodel="BM25")
         models['Bo1'] = models['BM25'] >> pt.rewrite.Bo1QueryExpansion(index, fb_docs=fb_docs, fb_terms=fb_terms) >> models['BM25']
         models['KL'] = models['BM25'] >> pt.rewrite.KLQueryExpansion(index, fb_docs=fb_docs, fb_terms=fb_terms) >> models['BM25']
         models['RM3'] = models['BM25'] >> pt.rewrite.RM3(index, fb_docs=fb_docs, fb_terms=fb_terms, fb_lambda=0.8) >> models['BM25']
         models['Axiomatic'] = models['BM25'] >> pt.rewrite.AxiomaticQE(index, fb_docs=fb_docs, fb_terms=fb_terms) >> models['BM25']
 
+        # Set up the measures
         measures = [RR(rel=rel)@10, RR(rel=rel)@100, RR(rel=rel)@1000, nDCG@10, nDCG@100, nDCG@1000, MAP(rel=rel)@10, MAP(rel=rel)@100, MAP(rel=rel)@1000]
 
         if debug:
             print('Models loaded')
             print('Starting experiment...')
 
+        # Retrieve the topics and qrels
         if variant:
             topics = dataset.get_topics(variant=variant)
         else:
@@ -127,6 +129,7 @@ for dataset_info in datasets:
 
         result_rows = []
 
+        # Run the experiment per model so the execution time can be kept track of
         for model_name, model_obj in models.items():
             start_time = datetime.now()
             results = pt.Experiment(
@@ -135,7 +138,6 @@ for dataset_info in datasets:
                 qrels,
                 eval_metrics=measures,
                 names=[model_name],
-                # perquery=True,
                 verbose=debug,
                 batch_size=1000,
             )
@@ -148,77 +150,15 @@ for dataset_info in datasets:
 
                 print('Finished experiment')
                 print('Formatting results...')
-                with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 1000):  # more options can be specified also
+                with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 1000):
                     print(results)
             result_rows.append(results)
 
+        # Merge the results of the models
         results = pd.concat(result_rows)
 
         bm25_time = results.loc[results['name'] == 'BM25', 'time'].values[0]
         results['corrected_time'] = results['time'] - 2 * bm25_time
 
-        with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 1000):  # more options can be specified also
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 1000):
                 print(results.round(4))
-
-# results = results.merge(topics, on='qid', how='left')
-
-# for name in models.keys():
-#     print(name, ':')
-#     name_results = results[results['name'] == name]
-# #     # print(name_results)
-
-#     # for measure in measures:
-#     measure = measures[1]
-#     measure_str = str(measure)
-
-#     measure_results = name_results[name_results['measure'] == measure_str]
-
-#     word_scores = {}
-
-#     for index, row in measure_results.iterrows():
-#         split = row['query'].split()
-#         weight = 1 / len(split)
-
-#         for word in split:
-#             value = row['value']
-
-#             if word in word_scores:
-#                 cur_value, count = word_scores[word]
-#                 word_scores[word] = (((cur_value * count) + (value * weight)) / (count + weight), count + weight)
-#             else:
-#                 word_scores[word] = ((value * weight), weight)
-
-#     print(sorted([word_score_item for word_score_item in word_scores.items() if word_score_item[1][1] >= 1], key=lambda entry: entry[1][0], reverse=True))
-    # x = measure_results['query'].apply(lambda x: len(x.split()))
-    # y = measure_results['value']
-
-    # z = np.polyfit(x, y, 2)
-    # p = np.poly1d(z)
-    # r2 = r2_score(y, p(x))
-    # print(r2)
-    # fig, ax = plt.subplots(figsize=(10, 6))
-    # ax.scatter(x, y)
-    # ax.plot(x, p(x))
-    # ax.set_title('Value vs Word Count')
-    # ax.set_xlabel('Values')
-    # ax.set_ylabel('Word Count')
-    # html_str = mpld3.fig_to_html(fig)
-    # with open('plot.html', 'w') as f:
-    #     f.write(html_str)
-    # exit()
-
-
-
-#         measure_results.sort_values(by='value', axis=0, ascending=False, inplace=True)
-        # print(measure_results)
-
-# print('Results formatted')
-
-# results_wide = results.pivot_table(
-#     index='name',
-#     columns='measure',
-#     values='value',
-#     aggfunc='mean'
-# ).reset_index()
-
-# print(results_wide)
